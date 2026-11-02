@@ -23,7 +23,6 @@ class _Barrier:
         await self.released.wait()
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 async def test_every_url_keeps_its_own_redirect_target(checker, fake_dns):
     urls = ["https://a.test/start", "https://b.test/start", "https://c.test/start"]
     targets = {url: url.replace("/start", "/final") for url in urls}

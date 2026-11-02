@@ -15,9 +15,6 @@ from pingpanda.models import UrlResult
 # How long a single request may take, in seconds
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-# The final URL of the request that finished last
-LAST_FINAL_URL: str | None = None
-
 
 # Function to resolve hostname to IP:Port
 def resolve_ip_and_port(url):
@@ -42,8 +39,6 @@ def normalize_url(url):
 
 # Function to check URL status and redirection
 async def check_url_status(session, url_id, url):
-    global LAST_FINAL_URL
-
     url = normalize_url(url)
     started = time.perf_counter()
     try:
@@ -56,12 +51,10 @@ async def check_url_status(session, url_id, url):
         elapsed = time.perf_counter() - started
         return UrlResult(url_id, url, None, elapsed, None, "IP:Port Not Found", None)
 
-    LAST_FINAL_URL = str(response.url)
-    await asyncio.sleep(0)
-    final_url = LAST_FINAL_URL
+    final_url = str(response.url)
 
     original_ip_port = resolve_ip_and_port(url)
-    redirect_ip_port = resolve_ip_and_port(url) if final_url != url else None
+    redirect_ip_port = resolve_ip_and_port(final_url) if final_url != url else None
     redirect_to = final_url if final_url != url else None
 
     elapsed = time.perf_counter() - started
