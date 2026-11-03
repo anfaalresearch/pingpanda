@@ -67,7 +67,6 @@ async def test_report_file_contains_every_status_group(
     assert "===== 4XX =====" in content
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 async def test_one_broken_url_does_not_stop_the_batch(
     checker, mock_transport, fake_dns, tmp_path, capsys
 ):

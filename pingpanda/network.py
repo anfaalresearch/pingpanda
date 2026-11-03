@@ -42,12 +42,15 @@ async def check_url_status(session, url_id, url):
     url = normalize_url(url)
     started = time.perf_counter()
     try:
-        response = await session.get(
-            url,
-            follow_redirects=True,
-            timeout=httpx.Timeout(DEFAULT_TIMEOUT_SECONDS, read=None),
+        response = await asyncio.wait_for(
+            session.get(
+                url,
+                follow_redirects=True,
+                timeout=httpx.Timeout(DEFAULT_TIMEOUT_SECONDS),
+            ),
+            timeout=DEFAULT_TIMEOUT_SECONDS,
         )
-    except httpx.ConnectError:
+    except (httpx.RequestError, TimeoutError, asyncio.TimeoutError):
         elapsed = time.perf_counter() - started
         return UrlResult(url_id, url, None, elapsed, None, "IP:Port Not Found", None)
 

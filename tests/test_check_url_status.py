@@ -88,7 +88,6 @@ async def test_redirect_ip_belongs_to_the_redirect_target(checker, monkeypatch):
     assert result.redirect_ip_port == "10.0.0.2:443"
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 async def test_redirect_loop_is_reported_as_invalid(checker, local_server, fake_dns):
     async with httpx.AsyncClient() as session:
         result = await checker.check_url_status(session, 0, f"{local_server}/loop")
@@ -96,7 +95,6 @@ async def test_redirect_loop_is_reported_as_invalid(checker, local_server, fake_
     assert result.status is None
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 async def test_slow_server_times_out(checker, local_server, fake_dns, monkeypatch):
     monkeypatch.setattr(checker.network, "DEFAULT_TIMEOUT_SECONDS", 0.3)
 
