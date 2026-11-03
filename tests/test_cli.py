@@ -48,7 +48,6 @@ async def test_report_file_is_written(checker, mock_transport, fake_dns, tmp_pat
     assert "200" in content
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 async def test_report_file_contains_every_status_group(
     checker, mock_transport, fake_dns, tmp_path
 ):

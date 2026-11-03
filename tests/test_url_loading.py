@@ -25,7 +25,6 @@ def test_without_input_no_url_is_loaded(checker):
     assert checker.load_urls(args) is None
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 def test_missing_list_file_does_not_crash_the_tool(checker, tmp_path):
     missing = tmp_path / "there-is-no-such-file.txt"
 

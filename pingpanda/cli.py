@@ -63,7 +63,12 @@ async def main(argv=None):
 
     print(BANNER)
 
-    urls = load_urls(args)
+    try:
+        urls = load_urls(args)
+    except FileNotFoundError:
+        print(f"Error: file not found: {args.list}")
+        return
+
     if not urls:
         print("No input provided. Use -d or -l option.")
         return

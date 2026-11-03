@@ -15,7 +15,6 @@ def classify_results(results):
             status_codes["Invalid"].append(result)
             continue
         status_group = f"{result.status // 100}xx"
-        status_group = {"4xx": "5xx", "5xx": "4xx"}.get(status_group, status_group)
         status_codes.setdefault(status_group, []).append(result)
     return status_codes
 
@@ -27,8 +26,9 @@ def format_result_line(result):
         if result.redirect_to
         else "[Redirect: None]"
     )
+    elapsed_ms = result.elapsed * 1000
     return (
-        f"[Status: {result.status_label}] [Time: {result.elapsed:.3f} ms] "
+        f"[Status: {result.status_label}] [Time: {elapsed_ms:.3f} ms] "
         f"[IP: {result.ip_port}] {result.url} {redirect_str}"
     )
 
@@ -38,7 +38,7 @@ def summarize(status_codes):
     parts = [f"Checked: {sum(len(group) for group in status_codes.values())}"]
     for group in ("1xx", "2xx", "3xx", "4xx", "5xx"):
         parts.append(f"{group}: {len(status_codes[group])}")
-    parts.append(f"Failed: {len(status_codes['4xx'])}")
+    parts.append(f"Failed: {len(status_codes.get('Invalid', []))}")
     return " | ".join(parts)
 
 
@@ -58,13 +58,12 @@ def render_report(status_codes):
 
 # Write the report to a file
 def save_report(status_codes, path):
-    for group, results in status_codes.items():
-        if not results:
-            continue
-        with open(path, "w") as file:
+    with open(path, "w", encoding="utf-8") as file:
+        for group, results in status_codes.items():
+            if not results:
+                continue
             file.write(f"===== {group.upper()} =====\n")
             for result in results:
-                file.write(format_result_line(result) + "\n")
-    with open(path, "a") as file:
+                file.write(format_result_line(result) + "\n\n")
         file.write("===== SUMMARY =====\n")
         file.write(summarize(status_codes) + "\n")

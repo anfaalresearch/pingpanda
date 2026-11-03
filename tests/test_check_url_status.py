@@ -47,7 +47,6 @@ async def test_url_without_scheme_is_checked_over_https(checker, fake_dns):
     assert seen["url"].startswith("https://")
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 async def test_response_time_is_reported_in_milliseconds(checker, fake_dns):
     async def handler(request):
         await asyncio.sleep(0.25)

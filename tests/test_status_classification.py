@@ -15,13 +15,11 @@ def test_redirect_is_grouped_as_3xx(checker, make_result):
     assert len(groups["3xx"]) == 1
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 def test_client_error_is_grouped_as_4xx(checker, make_result):
     groups = checker.classify_results({0: make_result(status=404)})
     assert len(groups["4xx"]) == 1
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 def test_server_error_is_grouped_as_5xx(checker, make_result):
     groups = checker.classify_results({0: make_result(status=500)})
     assert len(groups["5xx"]) == 1

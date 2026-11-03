@@ -33,7 +33,6 @@ def test_invalid_url_is_labelled_as_invalid(checker, make_result):
     assert "[Status: Invalid]" in line
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 def test_report_contains_every_status_group(checker, make_result, capsys):
     results = {
         0: make_result(status=200, url="https://good.test/"),
@@ -64,7 +63,6 @@ def test_summary_counts_every_checked_url(checker, make_result):
     assert "Checked: 3" in summary
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 def test_summary_counts_the_failed_urls(checker, make_result):
     results = {
         0: make_result(status=200),
@@ -76,7 +74,6 @@ def test_summary_counts_the_failed_urls(checker, make_result):
     assert "Failed: 2" in summary
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN_DEFECT)
 def test_report_file_keeps_every_status_group(checker, make_result, tmp_path):
     results = {
         0: make_result(status=200, url="https://good.test/"),
