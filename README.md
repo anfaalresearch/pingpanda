@@ -179,6 +179,8 @@ https://python.org
 | `-d`, `--domain` | Check a single URL or domain |
 | `-l`, `--list` | Check every URL in a text file, one per line |
 | `-o`, `--output` | Save the report to a file |
+| `--format` | Export report format: `text` (default), `json`, `csv`, or `markdown` |
+| `--summary-only` | Export summary statistics and latency percentiles only |
 | `--checkpoint PATH` | Choose where scan progress is saved (default: `.pingpanda-checkpoint.json`) |
 | `--resume` | Resume from the selected checkpoint, skipping completed URLs |
 | `--retries N` | Retry transient failures up to `N` times after the initial request (default: `0`) |
@@ -188,6 +190,41 @@ https://python.org
 | `-h`, `--help` | Show the help text |
 
 Provide one input source, either `-d` or `-l`, for each run.
+
+### Structured Export Formats
+
+PingPanda supports multi-format reporting via `--format`:
+
+```bash
+# JSON export with latency percentiles and URL records
+python url-status-checker.py -l urls.txt --format json -o scan.json
+
+# RFC 4180 CSV export for spreadsheets and data processing
+python url-status-checker.py -l urls.txt --format csv -o scan.csv
+
+# GitHub Flavored Markdown report for PR summaries or CI/CD dashboards
+python url-status-checker.py -l urls.txt --format markdown -o scan.md
+
+# Summary only (latency percentiles and availability without detailed records)
+python url-status-checker.py -l urls.txt --format json --summary-only -o summary.json
+```
+
+Whenever a report file is saved, a confirmation message with the destination path is printed to the terminal:
+```text
+[Report] Saved JSON report to scan.json
+```
+
+#### Metrics & Definitions
+
+* **Availability Rate**: Percentage of scanned URLs that returned a valid HTTP response (1xx–5xx) versus network, DNS, or socket timeout failures.
+* **Latency Percentiles**:
+  * **Min**: Minimum observed response latency across checked endpoints.
+  * **Mean**: Arithmetic mean (average) response latency across checked endpoints.
+  * **p50 (Median)**: 50th percentile latency; 50% of requests responded faster than this value.
+  * **p95**: 95th percentile latency; identifies tail response degradation for slower endpoints.
+  * **p99**: 99th percentile peak latency; highlights extreme outliers and near-worst-case response times.
+  * **Max**: Maximum observed response latency across checked endpoints.
+* **Failure Diagnostics**: Categorizes unreachable endpoints into actionable reasons: `DNS_RESOLUTION_ERROR`, `CONNECTION_TIMEOUT`, `CONNECTION_REFUSED`, `SSL_CERTIFICATE_ERROR`, and `HTTP_PROTOCOL_ERROR`.
 
 ### Report format
 

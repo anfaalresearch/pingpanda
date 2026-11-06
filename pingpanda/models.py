@@ -17,7 +17,12 @@ class UrlResult:
     ip_port: str
     redirect_ip_port: str | None
     attempts: int = 1
+    error_category: str | None = None
 
     @property
     def status_label(self) -> str:
         return "Invalid" if self.status is None else str(self.status)
+
+    @property
+    def elapsed_ms(self) -> float:
+        return self.elapsed * 1000.0

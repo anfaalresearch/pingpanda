@@ -98,6 +98,42 @@ async def check_url_status(
     _validate_retry_options(max_retries, retry_delay)
     url = normalize_url(url)
     started = time.perf_counter()
+def _categorize_exception(exc: Exception) -> str:
+    if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)):
+        return "CONNECTION_TIMEOUT"
+    if isinstance(exc, httpx.ConnectError):
+        err_msg = str(exc).lower()
+        if any(
+            term in err_msg
+            for term in (
+                "gaierror",
+                "name or service not known",
+                "nodename nor servname provided",
+                "getaddrinfo",
+            )
+        ):
+            return "DNS_RESOLUTION_ERROR"
+        return "CONNECTION_REFUSED"
+    if isinstance(exc, httpx.RequestError):
+        err_msg = str(exc).lower()
+        if any(term in err_msg for term in ("certificate", "ssl", "cert")):
+            return "SSL_CERTIFICATE_ERROR"
+        if "timeout" in err_msg:
+            return "CONNECTION_TIMEOUT"
+        return "HTTP_PROTOCOL_ERROR"
+    return "NETWORK_ERROR"
+
+
+async def check_url_status(
+    session,
+    url_id,
+    url,
+    max_retries=DEFAULT_RETRIES,
+    retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
+):
+    _validate_retry_options(max_retries, retry_delay)
+    url = normalize_url(url)
+    started = time.perf_counter()
     attempts = 0
 
     while True:
@@ -120,6 +156,7 @@ async def check_url_status(
                 continue
 
             elapsed = time.perf_counter() - started
+            category = _categorize_exception(exc)
             return UrlResult(
                 url_id,
                 url,
@@ -128,7 +165,8 @@ async def check_url_status(
                 None,
                 "IP:Port Not Found",
                 None,
-                attempts,
+                attempts=attempts,
+                error_category=category,
             )
 
         if response.status_code in RETRYABLE_STATUS_CODES and attempts <= max_retries:
@@ -154,7 +192,7 @@ async def check_url_status(
             redirect_to,
             original_ip_port,
             redirect_ip_port,
-            attempts,
+            attempts=attempts,
         )
 
 

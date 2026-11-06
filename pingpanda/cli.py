@@ -95,11 +95,22 @@ def parse_arguments(argv=None):
     parser.add_argument("-v", "--version", action="store_true", help="Display version information")
     parser.add_argument("-update", action="store_true", help="Update the tool")
     parser.add_argument(
-    "--max-concurrent",
-    type=positive_int,
-    default=DEFAULT_MAX_CONCURRENT,
-    help="Maximum number of URLs to check concurrently (default: 10)",
-)
+        "--max-concurrent",
+        type=positive_int,
+        default=DEFAULT_MAX_CONCURRENT,
+        help="Maximum number of URLs to check concurrently (default: 10)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["text", "json", "csv", "markdown"],
+        default="text",
+        help="Export format for the report (default: text)",
+    )
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="Export summary statistics and latency percentiles only",
+    )
     return parser.parse_args(argv)
 
 
@@ -161,7 +172,12 @@ async def main(argv=None):
         print(f"Checkpoint error: {exc}", file=sys.stderr)
         return
     status_codes = classify_results(results)
-    render_report(status_codes)
+    render_report(status_codes, summary_only=args.summary_only)
 
     if args.output:
-        save_report(status_codes, args.output)
+        save_report(
+            status_codes,
+            args.output,
+            format=args.format,
+            summary_only=args.summary_only,
+        )
