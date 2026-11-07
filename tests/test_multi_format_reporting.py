@@ -8,8 +8,6 @@ import httpx
 import pytest
 
 from pingpanda.report import (
-    AVAILABILITY_RATE_DEFINITION,
-    LATENCY_METRIC_DEFINITIONS,
     compute_latency_percentiles,
     extract_scan_metrics,
     generate_csv_report,
@@ -18,17 +16,6 @@ from pingpanda.report import (
     generate_text_report,
     save_report,
 )
-
-
-def test_latency_definitions_contain_all_required_metrics():
-    for metric in ("min", "mean", "p50", "p95", "p99", "max"):
-        assert metric in LATENCY_METRIC_DEFINITIONS
-        assert len(LATENCY_METRIC_DEFINITIONS[metric]) > 10
-
-
-def test_availability_rate_definition_is_explicit():
-    assert "Percentage of scanned URLs" in AVAILABILITY_RATE_DEFINITION
-    assert "valid HTTP response" in AVAILABILITY_RATE_DEFINITION
 
 
 def test_compute_latency_percentiles_empty():

@@ -27,8 +27,6 @@ from pingpanda.network import (
     resolve_ip_and_port,
 )
 from pingpanda.report import (
-    AVAILABILITY_RATE_DEFINITION,
-    LATENCY_METRIC_DEFINITIONS,
     classify_results,
     compute_latency_percentiles,
     extract_scan_metrics,
@@ -43,10 +41,8 @@ from pingpanda.report import (
 )
 
 __all__ = [
-    "AVAILABILITY_RATE_DEFINITION",
     "BANNER",
     "COLORS",
-    "LATENCY_METRIC_DEFINITIONS",
     "STATUS_GROUPS",
     "UrlResult",
     "check_all",

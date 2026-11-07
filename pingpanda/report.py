@@ -13,20 +13,6 @@ from colorama import Fore, Style
 from pingpanda.constants import COLORS, STATUS_GROUPS
 from pingpanda.models import UrlResult
 
-LATENCY_METRIC_DEFINITIONS: dict[str, str] = {
-    "min": "Minimum observed response latency across checked endpoints.",
-    "mean": "Arithmetic mean (average) response latency across checked endpoints.",
-    "p50": "50th percentile (median) latency; 50% of requests responded faster than this value.",
-    "p95": "95th percentile latency; identifies tail response degradation for slower endpoints.",
-    "p99": "99th percentile peak latency; highlights extreme outliers and near-worst-case response times.",
-    "max": "Maximum observed response latency across checked endpoints.",
-}
-
-AVAILABILITY_RATE_DEFINITION: str = (
-    "Percentage of scanned URLs that returned a valid HTTP response (1xx-5xx) "
-    "vs network/DNS/timeout failures."
-)
-
 
 # Group the results by their HTTP status class
 def classify_results(results: dict[int, UrlResult]) -> dict[str, list[UrlResult]]:
