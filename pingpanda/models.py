@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -18,6 +18,9 @@ class UrlResult:
     redirect_ip_port: str | None
     attempts: int = 1
     error_category: str | None = None
+    assertions_passed: bool | None = None
+    assertion_failures: list[str] = field(default_factory=list)
+    sla_breached: bool = False
 
     @property
     def status_label(self) -> str:

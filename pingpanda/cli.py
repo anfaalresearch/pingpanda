@@ -8,6 +8,12 @@ import sys
 
 from pingpanda.checkpoint import CheckpointError, load_checkpoint, save_checkpoint
 from pingpanda.constants import BANNER
+from pingpanda.assertions import (
+    AssertionConfig,
+    parse_expect_header_option,
+    parse_header_option,
+    parse_status_codes,
+)
 from pingpanda.network import (
     check_all,
     DEFAULT_MAX_CONCURRENT,
@@ -126,7 +132,96 @@ def parse_arguments(argv=None):
         help="Export summary statistics and latency percentiles only",
     )
 
+    parser.add_argument(
+        "-H",
+        "--header",
+        action="append",
+        dest="headers",
+        metavar="HEADER",
+        help="Custom request header to send with checks (e.g. 'Authorization: Bearer token'). Repeatable.",
+    )
+    parser.add_argument(
+        "--expect-status",
+        metavar="CODES",
+        help="Expected HTTP status code(s) or ranges, comma-separated (e.g. '200,204' or '200-299')",
+    )
+    parser.add_argument(
+        "--expect-body",
+        metavar="TEXT",
+        help="Expected substring in response body",
+    )
+    parser.add_argument(
+        "--expect-body-regex",
+        metavar="REGEX",
+        help="Expected regular expression pattern matching response body",
+    )
+    parser.add_argument(
+        "--expect-header",
+        action="append",
+        dest="expect_headers",
+        metavar="HEADER",
+        help="Expected response header to validate (e.g. 'Content-Type: application/json' or 'Content-Type'). Repeatable.",
+    )
+    parser.add_argument(
+        "--max-latency",
+        type=non_negative_float,
+        default=None,
+        metavar="SECONDS",
+        help="Maximum acceptable response time SLA in seconds (e.g. 0.5 for 500ms)",
+    )
+
     return parser.parse_args(argv)
+
+
+def build_assertion_config(args: argparse.Namespace) -> AssertionConfig | None:
+    """Build an AssertionConfig from parsed CLI arguments, or None if no assertions configured."""
+    import re
+
+    custom_headers: dict[str, str] = {}
+    if getattr(args, "headers", None):
+        for h in args.headers:
+            name, val = parse_header_option(h)
+            custom_headers[name] = val
+
+    expect_status: set[int] | None = None
+    if getattr(args, "expect_status", None):
+        expect_status = parse_status_codes(args.expect_status)
+
+    expect_body = getattr(args, "expect_body", None)
+
+    expect_body_regex = None
+    if getattr(args, "expect_body_regex", None):
+        try:
+            expect_body_regex = re.compile(args.expect_body_regex)
+        except re.error as exc:
+            raise ValueError(f"Invalid regex for --expect-body-regex: {exc}") from exc
+
+    expect_headers: dict[str, str | None] = {}
+    if getattr(args, "expect_headers", None):
+        for eh in args.expect_headers:
+            name, val = parse_expect_header_option(eh)
+            expect_headers[name] = val
+
+    max_latency = getattr(args, "max_latency", None)
+
+    if (
+        not custom_headers
+        and expect_status is None
+        and expect_body is None
+        and expect_body_regex is None
+        and not expect_headers
+        and max_latency is None
+    ):
+        return None
+
+    return AssertionConfig(
+        expect_status=expect_status,
+        expect_body=expect_body,
+        expect_body_regex=expect_body_regex,
+        expect_headers=expect_headers,
+        max_latency=max_latency,
+        custom_headers=custom_headers,
+    )
 
 
 def load_urls(args):
@@ -175,6 +270,12 @@ async def main(argv=None):
             f"of {len(urls)} URLs already completed."
         )
 
+    try:
+        assertion_config = build_assertion_config(args)
+    except ValueError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return
+
     def persist_progress(completed_results):
         save_checkpoint(args.checkpoint, urls, completed_results)
 
@@ -187,6 +288,7 @@ async def main(argv=None):
             show_progress=not args.quiet,
             max_retries=args.retries,
             retry_delay=args.retry_delay,
+            assertion_config=assertion_config,
         )
 
         # Also create a checkpoint for an empty or already-complete resumed scan.

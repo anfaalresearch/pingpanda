@@ -17,7 +17,14 @@ The package is split into small modules, every module has one job:
 Released under the MIT License - see the LICENSE file.
 """
 
-from pingpanda.cli import load_urls, main, parse_arguments
+from pingpanda.assertions import (
+    AssertionConfig,
+    evaluate_assertions,
+    parse_expect_header_option,
+    parse_header_option,
+    parse_status_codes,
+)
+from pingpanda.cli import build_assertion_config, load_urls, main, parse_arguments
 from pingpanda.constants import BANNER, COLORS, STATUS_GROUPS
 from pingpanda.models import UrlResult
 from pingpanda.network import (
@@ -41,14 +48,17 @@ from pingpanda.report import (
 )
 
 __all__ = [
+    "AssertionConfig",
     "BANNER",
     "COLORS",
     "STATUS_GROUPS",
     "UrlResult",
+    "build_assertion_config",
     "check_all",
     "check_url_status",
     "classify_results",
     "compute_latency_percentiles",
+    "evaluate_assertions",
     "extract_scan_metrics",
     "format_result_line",
     "generate_csv_report",
@@ -59,6 +69,9 @@ __all__ = [
     "main",
     "normalize_url",
     "parse_arguments",
+    "parse_expect_header_option",
+    "parse_header_option",
+    "parse_status_codes",
     "render_report",
     "resolve_ip_and_port",
     "save_report",

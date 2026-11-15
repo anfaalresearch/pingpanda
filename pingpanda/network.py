@@ -12,6 +12,7 @@ import httpx
 
 from tqdm import tqdm
 
+from pingpanda.assertions import AssertionConfig, evaluate_assertions
 from pingpanda.models import UrlResult
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -88,16 +89,6 @@ def _is_retryable_exception(exc):
     return not isinstance(exc, httpx.TooManyRedirects)
 
 
-async def check_url_status(
-    session,
-    url_id,
-    url,
-    max_retries=DEFAULT_RETRIES,
-    retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
-):
-    _validate_retry_options(max_retries, retry_delay)
-    url = normalize_url(url)
-    started = time.perf_counter()
 def _categorize_exception(exc: Exception) -> str:
     if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)):
         return "CONNECTION_TIMEOUT"
@@ -130,11 +121,18 @@ async def check_url_status(
     url,
     max_retries=DEFAULT_RETRIES,
     retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
+    assertion_config: AssertionConfig | None = None,
 ):
     _validate_retry_options(max_retries, retry_delay)
     url = normalize_url(url)
     started = time.perf_counter()
     attempts = 0
+
+    req_headers = (
+        assertion_config.custom_headers
+        if assertion_config and assertion_config.custom_headers
+        else None
+    )
 
     while True:
         attempts += 1
@@ -142,6 +140,7 @@ async def check_url_status(
             response = await asyncio.wait_for(
                 session.get(
                     url,
+                    headers=req_headers,
                     follow_redirects=True,
                     timeout=httpx.Timeout(DEFAULT_TIMEOUT_SECONDS, read=None),
                 ),
@@ -157,6 +156,13 @@ async def check_url_status(
 
             elapsed = time.perf_counter() - started
             category = _categorize_exception(exc)
+            assertions_passed, assertion_failures, sla_breached = evaluate_assertions(
+                None,
+                None,
+                None,
+                elapsed,
+                assertion_config,
+            )
             return UrlResult(
                 url_id,
                 url,
@@ -167,6 +173,9 @@ async def check_url_status(
                 None,
                 attempts=attempts,
                 error_category=category,
+                assertions_passed=assertions_passed,
+                assertion_failures=assertion_failures,
+                sla_breached=sla_breached,
             )
 
         if response.status_code in RETRYABLE_STATUS_CODES and attempts <= max_retries:
@@ -174,6 +183,7 @@ async def check_url_status(
             await asyncio.sleep(retry_delay * 2 ** (attempts - 1))
             continue
 
+        elapsed = time.perf_counter() - started
         final_url = str(response.url)
         original_ip_port = await resolve_ip_and_port(url)
         redirect_ip_port = (
@@ -183,7 +193,21 @@ async def check_url_status(
         )
         redirect_to = final_url if final_url != url else None
 
-        elapsed = time.perf_counter() - started
+        response_body = None
+        if assertion_config and assertion_config.requires_body:
+            try:
+                response_body = response.text[:65536]
+            except Exception:
+                response_body = ""
+
+        assertions_passed, assertion_failures, sla_breached = evaluate_assertions(
+            response.status_code,
+            dict(response.headers),
+            response_body,
+            elapsed,
+            assertion_config,
+        )
+
         return UrlResult(
             url_id,
             url,
@@ -193,6 +217,9 @@ async def check_url_status(
             original_ip_port,
             redirect_ip_port,
             attempts=attempts,
+            assertions_passed=assertions_passed,
+            assertion_failures=assertion_failures,
+            sla_breached=sla_breached,
         )
 
 async def check_all(
@@ -203,6 +230,7 @@ async def check_all(
     show_progress=True,
     max_retries=DEFAULT_RETRIES,
     retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
+    assertion_config: AssertionConfig | None = None,
 ):
 
     """Check unfinished URLs with bounded concurrency.
@@ -267,6 +295,7 @@ async def check_all(
                         url,
                         max_retries=max_retries,
                         retry_delay=retry_delay,
+                        assertion_config=assertion_config,
                     )
                     results[result.url_id] = result
 

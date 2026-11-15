@@ -56,6 +56,7 @@ PingPanda started as [Status Checker](https://github.com/BLACK-SCORP10/url-statu
 url-status-checker.py    Entry point for the command-line tool
 pingpanda/
 ├── __init__.py          Package exports
+├── assertions.py        HTTP health assertions and SLA verification engine
 ├── constants.py         Banner, colours, and status groups
 ├── models.py            Data model for a checked URL
 ├── network.py           URL preparation, address lookup, and checks
@@ -183,6 +184,12 @@ https://python.org
 | `-o`, `--output` | Save the report to a file |
 | `--format` | Export report format: `text` (default), `json`, `csv`, or `markdown` |
 | `--summary-only` | Export summary statistics and latency percentiles only |
+| `-H`, `--header HEADER` | Custom request header to send with checks (e.g. `'Authorization: Bearer token'`). Repeatable. |
+| `--expect-status CODES` | Expected status code(s) or ranges (e.g. `200,204` or `200-299`) |
+| `--expect-body TEXT` | Expected text substring in response body |
+| `--expect-body-regex REGEX` | Expected regular expression matching response body |
+| `--expect-header HEADER` | Expected response header (e.g. `'Content-Type: application/json'` or `'X-Trace-Id'`). Repeatable. |
+| `--max-latency SECONDS` | Enforce maximum response-time SLA in seconds (e.g. `0.5` for 500ms) |
 | `--checkpoint PATH` | Choose where scan progress is saved (default: `.pingpanda-checkpoint.json`) |
 | `--resume` | Resume from the selected checkpoint, skipping completed URLs |
 | `--retries N` | Retry transient failures up to `N` times after the initial request (default: `0`) |
@@ -216,6 +223,34 @@ python url-status-checker.py -l urls.txt --quiet --no-colour
 ```
 
 Quiet mode still displays the final report.
+
+### HTTP Health Assertions & Latency SLA Validation
+
+PingPanda supports validating response conditions, injecting custom request headers, and enforcing response-time Service Level Agreements (SLAs):
+
+```bash
+# Verify expected status codes and response body content
+python url-status-checker.py -l urls.txt --expect-status 200,204 --expect-body "healthy"
+
+# Send authentication header and check response with a regex pattern
+python url-status-checker.py -d https://api.example.com/health \
+    -H "Authorization: Bearer my-token" \
+    --expect-body-regex '"status":\s*"ok"'
+
+# Enforce a 500ms response SLA and validate Content-Type header
+python url-status-checker.py -l urls.txt --max-latency 0.5 \
+    --expect-header "Content-Type: application/json"
+```
+
+When assertion flags are provided:
+- Each checked URL line displays `[Assertions: PASSED]` or details specific failures `[Assertions: FAILED (...)]`.
+- Endpoints exceeding `--max-latency` are flagged with `[SLA: BREACHED]`.
+- The terminal summary shows overall assertion compliance rate and SLA breaches:
+  ```text
+  [Assertions] 94/100 Passed (94.0%)
+  [SLA Checks] 2 endpoint(s) breached latency threshold
+  ```
+
 ### Structured Export Formats
 
 PingPanda supports multi-format reporting via `--format`:
@@ -250,6 +285,8 @@ Whenever a report file is saved, a confirmation message with the destination pat
   * **p99**: 99th percentile peak latency; highlights extreme outliers and near-worst-case response times.
   * **Max**: Maximum observed response latency across checked endpoints.
 * **Failure Diagnostics**: Categorizes unreachable endpoints into actionable reasons: `DNS_RESOLUTION_ERROR`, `CONNECTION_TIMEOUT`, `CONNECTION_REFUSED`, `SSL_CERTIFICATE_ERROR`, and `HTTP_PROTOCOL_ERROR`.
+* **Assertion Compliance**: Percentage of evaluated endpoints that satisfy all status code, body, and header criteria.
+* **Latency SLA**: Flags endpoints that exceed the maximum response duration specified by `--max-latency`.
 
 ### Report format
 

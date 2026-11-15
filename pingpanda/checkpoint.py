@@ -57,6 +57,9 @@ def save_checkpoint(
             "redirect_ip_port": result.redirect_ip_port,
             "attempts": result.attempts,
             "error_category": getattr(result, "error_category", None),
+            "assertions_passed": getattr(result, "assertions_passed", None),
+            "assertion_failures": list(getattr(result, "assertion_failures", [])),
+            "sla_breached": getattr(result, "sla_breached", False),
         }
 
     payload = {
@@ -133,6 +136,9 @@ def load_checkpoint(
             attempts = item.get("attempts", 1)
 
             error_category = item.get("error_category")
+            assertions_passed = item.get("assertions_passed")
+            assertion_failures = item.get("assertion_failures", [])
+            sla_breached = bool(item.get("sla_breached", False))
             if (
                 isinstance(result_id, bool)
                 or not isinstance(result_id, int)
@@ -159,6 +165,11 @@ def load_checkpoint(
                     error_category is not None
                     and not isinstance(error_category, str)
                 )
+                or (
+                    assertions_passed is not None
+                    and not isinstance(assertions_passed, bool)
+                )
+                or not isinstance(assertion_failures, list)
             ):
                 raise ValueError("Invalid result fields.")
 
@@ -172,6 +183,9 @@ def load_checkpoint(
                 redirect_ip_port=redirect_ip_port,
                 attempts=attempts,
                 error_category=error_category,
+                assertions_passed=assertions_passed,
+                assertion_failures=[str(f) for f in assertion_failures],
+                sla_breached=sla_breached,
             )
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise CheckpointError(

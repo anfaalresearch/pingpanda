@@ -34,10 +34,19 @@ def format_result_line(result: UrlResult) -> str:
         if result.redirect_to
         else "[Redirect: None]"
     )
+    assertion_str = ""
+    if result.assertions_passed is True:
+        assertion_str = " [Assertions: PASSED]"
+    elif result.assertions_passed is False:
+        fail_desc = "; ".join(result.assertion_failures) if result.assertion_failures else "FAILED"
+        assertion_str = f" [Assertions: FAILED ({fail_desc})]"
+
+    sla_str = " [SLA: BREACHED]" if result.sla_breached else ""
+
     return (
         f"[Status: {result.status_label}] [Attempts: {result.attempts}] "
         f"[Time: {result.elapsed:.3f} ms] "
-        f"[IP: {result.ip_port}] {result.url} {redirect_str}"
+        f"[IP: {result.ip_port}] {result.url} {redirect_str}{assertion_str}{sla_str}"
     )
 
 
@@ -135,6 +144,18 @@ def extract_scan_metrics(
             group = f"{r.status // 100}xx"
             status_counts[group] = status_counts.get(group, 0) + 1
 
+    evaluated_assertions = [r for r in result_list if r.assertions_passed is not None]
+    assertions_configured = len(evaluated_assertions) > 0
+    passed_assertions = [r for r in evaluated_assertions if r.assertions_passed]
+    assertions_passed_count = len(passed_assertions)
+    assertions_failed_count = len(evaluated_assertions) - assertions_passed_count
+    assertions_compliance_rate = (
+        round((assertions_passed_count / len(evaluated_assertions)) * 100.0, 2)
+        if evaluated_assertions
+        else 0.0
+    )
+    sla_breached_count = sum(1 for r in result_list if r.sla_breached)
+
     return {
         "total_scanned": total_scanned,
         "available_count": available_count,
@@ -143,6 +164,12 @@ def extract_scan_metrics(
         "status_counts": status_counts,
         "error_counts": error_counts,
         "latency_stats": latency_stats,
+        "assertions_configured": assertions_configured,
+        "assertions_evaluated_count": len(evaluated_assertions),
+        "assertions_passed_count": assertions_passed_count,
+        "assertions_failed_count": assertions_failed_count,
+        "assertions_compliance_rate": assertions_compliance_rate,
+        "sla_breached_count": sla_breached_count,
     }
 
 
@@ -168,9 +195,16 @@ def generate_json_report(
         "error_diagnostics": metrics["error_counts"],
     }
 
+    if metrics.get("assertions_configured"):
+        data["metadata"]["assertions_compliance_rate_percent"] = metrics["assertions_compliance_rate"]
+        data["metadata"]["assertions_passed_count"] = metrics["assertions_passed_count"]
+        data["metadata"]["assertions_failed_count"] = metrics["assertions_failed_count"]
+        data["metadata"]["sla_breached_count"] = metrics["sla_breached_count"]
+
     if not summary_only:
-        data["results"] = [
-            {
+        data["results"] = []
+        for r in all_results:
+            item = {
                 "url_id": r.url_id,
                 "url": r.url,
                 "status_code": r.status,
@@ -182,8 +216,12 @@ def generate_json_report(
                 "redirect_ip_port": r.redirect_ip_port,
                 "error_category": getattr(r, "error_category", None),
             }
-            for r in all_results
-        ]
+            if r.assertions_passed is not None:
+                item["assertions_passed"] = r.assertions_passed
+                item["assertion_failures"] = r.assertion_failures
+            if r.sla_breached or r.assertions_passed is not None:
+                item["sla_breached"] = r.sla_breached
+            data["results"].append(item)
 
     return json.dumps(data, indent=2)
 
@@ -212,8 +250,13 @@ def generate_csv_report(
             writer.writerow([f"latency_{metric}_ms", val])
         for err, count in metrics["error_counts"].items():
             writer.writerow([f"error_{err}", count])
+        if metrics.get("assertions_configured"):
+            writer.writerow(["assertions_compliance_rate_percent", f"{metrics['assertions_compliance_rate']}%"])
+            writer.writerow(["assertions_passed_count", metrics["assertions_passed_count"]])
+            writer.writerow(["assertions_failed_count", metrics["assertions_failed_count"]])
+            writer.writerow(["sla_breached_count", metrics["sla_breached_count"]])
     else:
-        writer.writerow([
+        headers = [
             "url_id",
             "url",
             "status_code",
@@ -224,9 +267,13 @@ def generate_csv_report(
             "redirect_to",
             "redirect_ip_port",
             "error_category",
-        ])
+        ]
+        if metrics.get("assertions_configured"):
+            headers.extend(["assertions_passed", "assertion_failures", "sla_breached"])
+        writer.writerow(headers)
+
         for r in all_results:
-            writer.writerow([
+            row = [
                 r.url_id,
                 r.url,
                 r.status if r.status is not None else "",
@@ -237,7 +284,14 @@ def generate_csv_report(
                 r.redirect_to or "",
                 r.redirect_ip_port or "",
                 getattr(r, "error_category", "") or "",
-            ])
+            ]
+            if metrics.get("assertions_configured"):
+                row.extend([
+                    "" if r.assertions_passed is None else ("true" if r.assertions_passed else "false"),
+                    "; ".join(r.assertion_failures) if r.assertion_failures else "",
+                    "true" if r.sla_breached else "false",
+                ])
+            writer.writerow(row)
 
     return out.getvalue()
 
@@ -259,11 +313,22 @@ def generate_markdown_report(
         f"- **Availability Rate:** {metrics['availability_rate']}%",
         "- **Status Breakdown:** "
         + " | ".join(f"{k}: {v}" for k, v in metrics["status_counts"].items()),
+    ]
+
+    if metrics.get("assertions_configured"):
+        lines.append(
+            f"- **Assertion Compliance:** {metrics['assertions_compliance_rate']}% "
+            f"({metrics['assertions_passed_count']}/{metrics['assertions_evaluated_count']} passed)"
+        )
+        if metrics.get("sla_breached_count", 0) > 0:
+            lines.append(f"- **SLA Breaches:** {metrics['sla_breached_count']}")
+
+    lines.extend([
         "",
         "## Latency Distribution",
         "| Metric | Latency (ms) |",
         "| :--- | :--- |",
-    ]
+    ])
 
     lat = metrics["latency_stats"]
     lines.append(f"| **Min** | {lat['min']:.2f} ms |")
@@ -284,20 +349,45 @@ def generate_markdown_report(
             lines.append(f"| `{err}` | {count} |")
 
     if not summary_only and all_results:
-        lines.extend([
-            "",
-            "## Detailed Results",
-            "| ID | URL | Status | Attempts | Latency | IP:Port | Redirect | Error Category |",
-            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
-        ])
-        for r in all_results:
-            status = str(r.status) if r.status is not None else r.status_label
-            attempts = getattr(r, "attempts", 1)
-            redirect = f"`{r.redirect_to}`" if r.redirect_to else "-"
-            err_cat = f"`{r.error_category}`" if getattr(r, "error_category", None) else "-"
-            lines.append(
-                f"| {r.url_id} | {r.url} | {status} | {attempts} | {r.elapsed * 1000.0:.2f} ms | {r.ip_port} | {redirect} | {err_cat} |"
-            )
+        if metrics.get("assertions_configured"):
+            lines.extend([
+                "",
+                "## Detailed Results",
+                "| ID | URL | Status | Attempts | Latency | IP:Port | Assertions | SLA | Error Category |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            ])
+            for r in all_results:
+                status = str(r.status) if r.status is not None else r.status_label
+                attempts = getattr(r, "attempts", 1)
+                err_cat = f"`{r.error_category}`" if getattr(r, "error_category", None) else "-"
+                assert_status = (
+                    "PASSED"
+                    if r.assertions_passed is True
+                    else (
+                        f"FAILED ({'; '.join(r.assertion_failures)})"
+                        if r.assertions_passed is False
+                        else "-"
+                    )
+                )
+                sla_status = "BREACHED" if r.sla_breached else "Met"
+                lines.append(
+                    f"| {r.url_id} | {r.url} | {status} | {attempts} | {r.elapsed * 1000.0:.2f} ms | {r.ip_port} | {assert_status} | {sla_status} | {err_cat} |"
+                )
+        else:
+            lines.extend([
+                "",
+                "## Detailed Results",
+                "| ID | URL | Status | Attempts | Latency | IP:Port | Redirect | Error Category |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            ])
+            for r in all_results:
+                status = str(r.status) if r.status is not None else r.status_label
+                attempts = getattr(r, "attempts", 1)
+                redirect = f"`{r.redirect_to}`" if r.redirect_to else "-"
+                err_cat = f"`{r.error_category}`" if getattr(r, "error_category", None) else "-"
+                lines.append(
+                    f"| {r.url_id} | {r.url} | {status} | {attempts} | {r.elapsed * 1000.0:.2f} ms | {r.ip_port} | {redirect} | {err_cat} |"
+                )
 
     lines.append("")
     return "\n".join(lines)
@@ -318,9 +408,16 @@ def generate_text_report(
                 lines.append(format_result_line(result))
     lines.append("===== SUMMARY =====")
     lines.append(summarize(status_codes))
+    metrics = extract_scan_metrics(status_codes)
+    if metrics.get("assertions_configured"):
+        lines.append(
+            f"[Assertions] {metrics['assertions_passed_count']}/{metrics['assertions_evaluated_count']} "
+            f"Passed ({metrics['assertions_compliance_rate']}%)"
+        )
+        if metrics.get("sla_breached_count", 0) > 0:
+            lines.append(f"[SLA Checks] {metrics['sla_breached_count']} endpoint(s) breached latency threshold")
     lines.append("")
     return "\n".join(lines)
-
 
 
 # Print the report to the terminal
@@ -350,6 +447,25 @@ def render_report(
 
     print("===== SUMMARY =====")
     print(summarize(status_codes))
+
+    metrics = extract_scan_metrics(status_codes)
+    if metrics.get("assertions_configured"):
+        compliance_str = (
+            f"[Assertions] {metrics['assertions_passed_count']}/{metrics['assertions_evaluated_count']} "
+            f"Passed ({metrics['assertions_compliance_rate']}%)"
+        )
+        if not no_colour:
+            color = Fore.GREEN if metrics["assertions_failed_count"] == 0 else Fore.RED
+            print(color + compliance_str + Style.RESET_ALL)
+        else:
+            print(compliance_str)
+
+        if metrics.get("sla_breached_count", 0) > 0:
+            sla_str = f"[SLA Checks] {metrics['sla_breached_count']} endpoint(s) breached latency threshold"
+            if not no_colour:
+                print(Fore.YELLOW + sla_str + Style.RESET_ALL)
+            else:
+                print(sla_str)
 
 
 # Write the report to a file
