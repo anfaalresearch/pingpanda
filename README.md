@@ -202,6 +202,9 @@ https://python.org
 | `--expect-body-regex REGEX` | Expected regular expression matching response body |
 | `--expect-header HEADER` | Expected response header (e.g. `'Content-Type: application/json'` or `'X-Trace-Id'`). Repeatable. |
 | `--max-latency SECONDS` | Enforce maximum response-time SLA in seconds (e.g. `0.5` for 500ms) |
+| `--check-ssl` | Inspect SSL/TLS certificates on HTTPS endpoints (validity, days to expiry, issuer, and protocol) |
+| `--ssl-expiry-warning DAYS` | Flag certificates expiring within `DAYS` as warnings (e.g. `30`) |
+| `--require-tls-version VERSION` | Enforce minimum TLS protocol version (e.g. `'1.2'` or `'1.3'`) |
 | `--checkpoint PATH` | Choose where scan progress is saved (default: `.pingpanda-checkpoint.json`) |
 | `--resume` | Resume from the selected checkpoint, skipping completed URLs |
 | `--retries N` | Retry transient failures up to `N` times after the initial request (default: `0`) |
@@ -262,6 +265,30 @@ When assertion flags are provided:
   [Assertions] 94/100 Passed (94.0%)
   [SLA Checks] 2 endpoint(s) breached latency threshold
   ```
+
+### SSL/TLS Certificate Inspection & Expiry Monitoring
+
+PingPanda can inspect SSL/TLS certificates on HTTPS endpoints to prevent unexpected downtime from expired certificates or insecure protocol versions:
+
+```bash
+# Basic SSL inspection (certificate validity, days remaining, issuer)
+python url-status-checker.py -l urls.txt --check-ssl
+
+# Flag certificates expiring within 30 days as warnings
+python url-status-checker.py -l urls.txt --check-ssl --ssl-expiry-warning 30
+
+# Enforce minimum TLS 1.2 protocol version and export results to Markdown
+python url-status-checker.py -l urls.txt --check-ssl --require-tls-version 1.2 --format markdown -o report.md
+```
+
+When SSL inspection is active:
+- Each checked URL displays certificate status: `[SSL: Valid (280d remaining, DigiCert Inc)]`, `[SSL: WARNING (...)]`, or `[SSL: EXPIRED (...)]`.
+- Non-HTTPS endpoints are cleanly marked as `[SSL: N/A (HTTP)]`.
+- The terminal summary shows SSL certificate health:
+  ```text
+  [SSL/TLS] 10 HTTPS checked: 8 valid, 1 warning, 1 expired, 0 error
+  ```
+- Structured exports (`json`, `csv`, `markdown`) automatically include SSL validity, days remaining, expiration timestamps, issuer details, and negotiated TLS versions.
 
 ### Structured Export Formats
 
