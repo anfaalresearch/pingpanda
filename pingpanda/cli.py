@@ -14,6 +14,11 @@ from pingpanda.assertions import (
     parse_header_option,
     parse_status_codes,
 )
+from pingpanda.cancellation import (
+    CancellationToken,
+    ScanCancelled,
+    capture_sigint,
+)
 from pingpanda.network import (
     check_all,
     DEFAULT_MAX_CONCURRENT,
@@ -236,17 +241,25 @@ def load_urls(args):
     return None
 
 
+def _print_interruption_summary(completed, total, checkpoint):
+    print("\nScan interrupted.")
+    print(f"Completed: {completed} / {total}")
+    print(f"Pending: {total - completed}")
+    print(f"Checkpoint saved to: {checkpoint}")
+    print("Run again with --resume to continue.")
+
+
 async def main(argv=None):
     make_output_safe()
     args = parse_arguments(argv)
 
     if args.version:
         print("StatusChecker.py version 1.0")
-        return
+        return 0
 
     if args.update:
         print("Checking for updates...")
-        return
+        return 0
 
     if not args.quiet:
         print(BANNER)
@@ -254,7 +267,7 @@ async def main(argv=None):
     urls = load_urls(args)
     if not urls:
         print("No input provided. Use -d or -l option.")
-        return
+        return 0
 
     initial_results = {}
 
@@ -263,7 +276,7 @@ async def main(argv=None):
             initial_results = load_checkpoint(args.checkpoint, urls)
         except CheckpointError as exc:
             print(f"Checkpoint error: {exc}", file=sys.stderr)
-            return
+            return 1
 
         print(
             f"Resuming scan: {len(initial_results)} "
@@ -274,29 +287,47 @@ async def main(argv=None):
         assertion_config = build_assertion_config(args)
     except ValueError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
-        return
+        return 1
 
     def persist_progress(completed_results):
         save_checkpoint(args.checkpoint, urls, completed_results)
 
+    cancellation_token = CancellationToken()
+
     try:
-        results = await check_all(
-            urls,
-            initial_results=initial_results,
-            on_result=persist_progress,
-            max_concurrent=args.max_concurrent,
-            show_progress=not args.quiet,
-            max_retries=args.retries,
-            retry_delay=args.retry_delay,
-            assertion_config=assertion_config,
-        )
+        with capture_sigint(cancellation_token):
+            results = await check_all(
+                urls,
+                initial_results=initial_results,
+                on_result=persist_progress,
+                max_concurrent=args.max_concurrent,
+                show_progress=not args.quiet,
+                max_retries=args.retries,
+                retry_delay=args.retry_delay,
+                assertion_config=assertion_config,
+                cancellation_token=cancellation_token,
+            )
 
         # Also create a checkpoint for an empty or already-complete resumed scan.
         save_checkpoint(args.checkpoint, urls, results)
 
+    except ScanCancelled as exc:
+        try:
+            save_checkpoint(args.checkpoint, urls, exc.results)
+        except CheckpointError as checkpoint_exc:
+            print(f"Checkpoint error: {checkpoint_exc}", file=sys.stderr)
+            return 1
+
+        _print_interruption_summary(
+            len(exc.results),
+            len(urls),
+            args.checkpoint,
+        )
+        return 130
+
     except CheckpointError as exc:
         print(f"Checkpoint error: {exc}", file=sys.stderr)
-        return
+        return 1
 
     status_codes = classify_results(results)
 
@@ -313,3 +344,5 @@ async def main(argv=None):
             format=args.format,
             summary_only=args.summary_only,
         )
+
+    return 0

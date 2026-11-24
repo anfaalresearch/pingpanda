@@ -161,6 +161,18 @@ python url-status-checker.py -l urls.txt --checkpoint .\\state\\scan.json --resu
 
 PingPanda saves progress after each completed URL to `.pingpanda-checkpoint.json` by default. A checkpoint is tied to the exact ordered URL list. If the input changes or is reordered, resume stops with a validation error rather than applying results to the wrong URLs.
 
+Gracefully stop a running scan with `Ctrl+C`. The first interrupt stops new URLs from being scheduled, allows active checks to settle, saves the latest completed results, and prints a resume summary. The command exits with status `130` so scripts can distinguish an interrupted scan from a successful one.
+
+```text
+Scan interrupted.
+Completed: 37 / 100
+Pending: 63
+Checkpoint saved to: .pingpanda-checkpoint.json
+Run again with --resume to continue.
+```
+
+Press `Ctrl+C` again if an immediate forced shutdown is required.
+
 Show the built-in help:
 
 ```bash

@@ -21,4 +21,4 @@ import asyncio
 from pingpanda.cli import main
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

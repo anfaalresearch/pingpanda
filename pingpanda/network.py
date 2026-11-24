@@ -13,6 +13,7 @@ import httpx
 from tqdm import tqdm
 
 from pingpanda.assertions import AssertionConfig, evaluate_assertions
+from pingpanda.cancellation import CancellationToken, ScanCancelled
 from pingpanda.models import UrlResult
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -222,6 +223,7 @@ async def check_url_status(
             sla_breached=sla_breached,
         )
 
+
 async def check_all(
     urls,
     initial_results=None,
@@ -231,12 +233,14 @@ async def check_all(
     max_retries=DEFAULT_RETRIES,
     retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
     assertion_config: AssertionConfig | None = None,
+    cancellation_token: CancellationToken | None = None,
 ):
-
     """Check unfinished URLs with bounded concurrency.
 
     URL IDs always refer to the original input order. Existing checkpoint
-    results are retained and are not requested again.
+    results are retained and are not requested again. When cancellation is
+    requested, workers finish their current request but do not schedule
+    another URL.
     """
     if (
         isinstance(max_concurrent, bool)
@@ -284,8 +288,17 @@ async def check_all(
 
             async def worker():
                 while True:
+                    if cancellation_token is not None and cancellation_token.cancelled:
+                        return
+
                     item = next(url_iterator, None)
                     if item is None:
+                        return
+
+                    # A signal may arrive after the iterator advances. Re-check
+                    # before issuing the request so no new URL starts after the
+                    # cancellation request.
+                    if cancellation_token is not None and cancellation_token.cancelled:
                         return
 
                     url_id, url = item
@@ -311,6 +324,13 @@ async def check_all(
             ]
 
             await asyncio.gather(*tasks)
+
+            if (
+                cancellation_token is not None
+                and cancellation_token.cancelled
+                and len(results) < len(urls)
+            ):
+                raise ScanCancelled(results)
 
     except BaseException:
         for task in tasks:
