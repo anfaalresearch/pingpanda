@@ -391,3 +391,90 @@ def test_checkpoint_persistence_with_ssl(tmp_path):
     assert loaded[0].ssl_info.issuer_org == "DigiCert Inc"
     assert loaded[0].ssl_info.days_remaining == 240
     assert loaded[1].ssl_info is None
+
+
+@pytest.mark.asyncio
+async def test_inspect_ssl_happy_eyeballs_invocation():
+    mock_writer = MagicMock()
+    mock_ssl_obj = MagicMock()
+    mock_ssl_obj.getpeercert.return_value = {
+        "notAfter": "Feb 28 00:00:00 2027 GMT",
+        "issuer": ((("organizationName", "Trust"),),),
+    }
+    mock_ssl_obj.version.return_value = "TLSv1.3"
+    mock_ssl_obj.cipher.return_value = ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+    mock_writer.get_extra_info.return_value = mock_ssl_obj
+    mock_writer.wait_closed = AsyncMock()
+
+    called_kwargs = {}
+
+    async def mock_open_conn(host, port, **kwargs):
+        nonlocal called_kwargs
+        called_kwargs = kwargs
+        return MagicMock(), mock_writer
+
+    with patch("asyncio.open_connection", side_effect=mock_open_conn):
+        res = await inspect_ssl_certificate("https://dualstack.example.com")
+
+    assert res.valid is True
+    assert called_kwargs.get("happy_eyeballs_delay") == 0.25
+    assert called_kwargs.get("server_hostname") == "dualstack.example.com"
+
+
+@pytest.mark.asyncio
+async def test_inspect_ssl_fallback_to_ipv4_on_timeout():
+    mock_writer = MagicMock()
+    mock_ssl_obj = MagicMock()
+    mock_ssl_obj.getpeercert.return_value = {
+        "notAfter": "Feb 28 00:00:00 2027 GMT",
+        "issuer": ((("organizationName", "Trust"),),),
+    }
+    mock_ssl_obj.version.return_value = "TLSv1.3"
+    mock_ssl_obj.cipher.return_value = ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+    mock_writer.get_extra_info.return_value = mock_ssl_obj
+    mock_writer.wait_closed = AsyncMock()
+
+    call_history = []
+
+    async def mock_open_conn(host, port, **kwargs):
+        call_history.append(kwargs)
+        if kwargs.get("family") == 2:  # socket.AF_INET
+            return MagicMock(), mock_writer
+        raise asyncio.TimeoutError()
+
+    with patch("asyncio.open_connection", side_effect=mock_open_conn):
+        res = await inspect_ssl_certificate("https://youtube.com")
+
+    assert res.valid is True
+    assert len(call_history) == 2
+    assert call_history[0].get("happy_eyeballs_delay") == 0.25
+    assert call_history[1].get("family") == 2
+
+
+@pytest.mark.asyncio
+async def test_inspect_ssl_type_error_compatibility_fallback():
+    mock_writer = MagicMock()
+    mock_ssl_obj = MagicMock()
+    mock_ssl_obj.getpeercert.return_value = {
+        "notAfter": "Feb 28 00:00:00 2027 GMT",
+    }
+    mock_ssl_obj.version.return_value = "TLSv1.3"
+    mock_ssl_obj.cipher.return_value = ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+    mock_writer.get_extra_info.return_value = mock_ssl_obj
+    mock_writer.wait_closed = AsyncMock()
+
+    call_count = 0
+
+    async def mock_open_conn(host, port, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if "happy_eyeballs_delay" in kwargs:
+            raise TypeError("unexpected keyword argument 'happy_eyeballs_delay'")
+        return MagicMock(), mock_writer
+
+    with patch("asyncio.open_connection", side_effect=mock_open_conn):
+        res = await inspect_ssl_certificate("https://legacy-loop.example.com")
+
+    assert res.valid is True
+    assert call_count == 2
+

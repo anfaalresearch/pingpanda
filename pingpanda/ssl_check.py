@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 import datetime
 import math
+import socket
 import ssl
 from typing import Any
 from urllib.parse import urlparse
@@ -100,6 +101,75 @@ def compare_tls_version(negotiated: str, required: str) -> bool:
     return neg_tuple >= req_tuple
 
 
+async def _open_ssl_connection(
+    hostname: str,
+    port: int,
+    ctx: ssl.SSLContext,
+    timeout: float,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Connect to host and perform SSL/TLS handshake with dual-stack Happy Eyeballs.
+
+    Supports IPv6 and IPv4 with RFC 8305 Happy Eyeballs (interleaving address families
+    and falling back to IPv4 if IPv6 routing stalls or drops packets). Also provides
+    explicit IPv4 fallback if the dual-stack attempt encounters network timeouts or
+    unreachable IPv6 routes.
+    """
+    is_ipv6_literal = ":" in hostname
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.open_connection(
+                hostname,
+                port,
+                ssl=ctx,
+                server_hostname=hostname,
+                happy_eyeballs_delay=0.25,
+            ),
+            timeout=timeout,
+        )
+    except TypeError:
+        # Fallback if custom mock or older loop does not accept happy_eyeballs_delay kwarg
+        try:
+            return await asyncio.wait_for(
+                asyncio.open_connection(
+                    hostname,
+                    port,
+                    ssl=ctx,
+                    server_hostname=hostname,
+                ),
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, OSError) as exc:
+            if not is_ipv6_literal:
+                return await asyncio.wait_for(
+                    asyncio.open_connection(
+                        hostname,
+                        port,
+                        ssl=ctx,
+                        server_hostname=hostname,
+                        family=socket.AF_INET,
+                    ),
+                    timeout=timeout,
+                )
+            raise exc
+    except (asyncio.TimeoutError, OSError) as exc:
+        if not is_ipv6_literal:
+            try:
+                return await asyncio.wait_for(
+                    asyncio.open_connection(
+                        hostname,
+                        port,
+                        ssl=ctx,
+                        server_hostname=hostname,
+                        family=socket.AF_INET,
+                    ),
+                    timeout=min(timeout, 5.0),
+                )
+            except Exception:
+                raise exc
+        raise exc
+
+
 async def inspect_ssl_certificate(
     url: str,
     ssl_config: SslConfig | None = None,
@@ -134,14 +204,11 @@ async def inspect_ssl_certificate(
     # Attempt 1: Strict default validation
     try:
         ctx = ssl.create_default_context()
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(
-                hostname,
-                port,
-                ssl=ctx,
-                server_hostname=hostname,
-            ),
-            timeout=config.timeout,
+        reader, writer = await _open_ssl_connection(
+            hostname,
+            port,
+            ctx,
+            config.timeout,
         )
 
         ssl_obj = writer.get_extra_info("ssl_object")
