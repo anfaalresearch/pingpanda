@@ -43,10 +43,26 @@ def format_result_line(result: UrlResult) -> str:
 
     sla_str = " [SLA: BREACHED]" if result.sla_breached else ""
 
+    ssl_str = ""
+    if getattr(result, "ssl_info", None) is not None:
+        info = result.ssl_info
+        if info.is_https:
+            if info.status == "valid":
+                issuer = info.issuer_org or info.issuer_cn or "Verified CA"
+                ssl_str = f" [SSL: Valid ({info.days_remaining}d remaining, {issuer})]"
+            elif info.status == "warning":
+                ssl_str = f" [SSL: WARNING ({info.warning or f'{info.days_remaining}d remaining'})]"
+            elif info.status == "expired":
+                ssl_str = f" [SSL: EXPIRED ({info.error or 'Expired'})]"
+            else:
+                ssl_str = f" [SSL: ERROR ({info.error or info.status})]"
+        else:
+            ssl_str = " [SSL: N/A (HTTP)]"
+
     return (
         f"[Status: {result.status_label}] [Attempts: {result.attempts}] "
         f"[Time: {result.elapsed:.3f} ms] "
-        f"[IP: {result.ip_port}] {result.url} {redirect_str}{assertion_str}{sla_str}"
+        f"[IP: {result.ip_port}] {result.url} {redirect_str}{assertion_str}{sla_str}{ssl_str}"
     )
 
 
@@ -54,8 +70,8 @@ def format_result_line(result: UrlResult) -> str:
 def summarize(status_codes: dict[str, list[UrlResult]]) -> str:
     parts = [f"Checked: {sum(len(group) for group in status_codes.values())}"]
     for group in ("1xx", "2xx", "3xx", "4xx", "5xx"):
-        parts.append(f"{group}: {len(status_codes[group])}")
-    parts.append(f"Failed: {len(status_codes['4xx'])}")
+        parts.append(f"{group}: {len(status_codes.get(group, []))}")
+    parts.append(f"Failed: {len(status_codes.get('4xx', []))}")
     return " | ".join(parts)
 
 
@@ -156,6 +172,38 @@ def extract_scan_metrics(
     )
     sla_breached_count = sum(1 for r in result_list if r.sla_breached)
 
+    ssl_results = [r for r in result_list if getattr(r, "ssl_info", None) is not None]
+    ssl_configured = len(ssl_results) > 0
+    ssl_total_checked = sum(1 for r in ssl_results if getattr(r.ssl_info, "is_https", False))
+    ssl_valid_count = sum(
+        1
+        for r in ssl_results
+        if getattr(r.ssl_info, "is_https", False)
+        and getattr(r.ssl_info, "valid", False)
+        and getattr(r.ssl_info, "status", "") == "valid"
+    )
+    ssl_warning_count = sum(
+        1
+        for r in ssl_results
+        if getattr(r.ssl_info, "is_https", False)
+        and getattr(r.ssl_info, "status", "") == "warning"
+    )
+    ssl_expired_count = sum(
+        1
+        for r in ssl_results
+        if getattr(r.ssl_info, "is_https", False)
+        and getattr(r.ssl_info, "status", "") == "expired"
+    )
+    ssl_error_count = sum(
+        1
+        for r in ssl_results
+        if getattr(r.ssl_info, "is_https", False)
+        and getattr(r.ssl_info, "status", "") == "error"
+    )
+    ssl_not_https_count = sum(
+        1 for r in ssl_results if not getattr(r.ssl_info, "is_https", False)
+    )
+
     return {
         "total_scanned": total_scanned,
         "available_count": available_count,
@@ -170,6 +218,13 @@ def extract_scan_metrics(
         "assertions_failed_count": assertions_failed_count,
         "assertions_compliance_rate": assertions_compliance_rate,
         "sla_breached_count": sla_breached_count,
+        "ssl_configured": ssl_configured,
+        "ssl_total_checked": ssl_total_checked,
+        "ssl_valid_count": ssl_valid_count,
+        "ssl_warning_count": ssl_warning_count,
+        "ssl_expired_count": ssl_expired_count,
+        "ssl_error_count": ssl_error_count,
+        "ssl_not_https_count": ssl_not_https_count,
     }
 
 
@@ -201,6 +256,16 @@ def generate_json_report(
         data["metadata"]["assertions_failed_count"] = metrics["assertions_failed_count"]
         data["metadata"]["sla_breached_count"] = metrics["sla_breached_count"]
 
+    if metrics.get("ssl_configured"):
+        data["metadata"]["ssl_summary"] = {
+            "https_checked": metrics["ssl_total_checked"],
+            "valid_count": metrics["ssl_valid_count"],
+            "warning_count": metrics["ssl_warning_count"],
+            "expired_count": metrics["ssl_expired_count"],
+            "error_count": metrics["ssl_error_count"],
+            "non_https_count": metrics["ssl_not_https_count"],
+        }
+
     if not summary_only:
         data["results"] = []
         for r in all_results:
@@ -221,6 +286,8 @@ def generate_json_report(
                 item["assertion_failures"] = r.assertion_failures
             if r.sla_breached or r.assertions_passed is not None:
                 item["sla_breached"] = r.sla_breached
+            if getattr(r, "ssl_info", None) is not None:
+                item["ssl"] = r.ssl_info.to_dict()
             data["results"].append(item)
 
     return json.dumps(data, indent=2)
@@ -255,6 +322,12 @@ def generate_csv_report(
             writer.writerow(["assertions_passed_count", metrics["assertions_passed_count"]])
             writer.writerow(["assertions_failed_count", metrics["assertions_failed_count"]])
             writer.writerow(["sla_breached_count", metrics["sla_breached_count"]])
+        if metrics.get("ssl_configured"):
+            writer.writerow(["ssl_https_checked", metrics["ssl_total_checked"]])
+            writer.writerow(["ssl_valid_count", metrics["ssl_valid_count"]])
+            writer.writerow(["ssl_warning_count", metrics["ssl_warning_count"]])
+            writer.writerow(["ssl_expired_count", metrics["ssl_expired_count"]])
+            writer.writerow(["ssl_error_count", metrics["ssl_error_count"]])
     else:
         headers = [
             "url_id",
@@ -270,6 +343,16 @@ def generate_csv_report(
         ]
         if metrics.get("assertions_configured"):
             headers.extend(["assertions_passed", "assertion_failures", "sla_breached"])
+        if metrics.get("ssl_configured"):
+            headers.extend([
+                "ssl_status",
+                "ssl_valid",
+                "ssl_days_remaining",
+                "ssl_expires_at",
+                "ssl_issuer",
+                "ssl_tls_version",
+                "ssl_error",
+            ])
         writer.writerow(headers)
 
         for r in all_results:
@@ -291,6 +374,22 @@ def generate_csv_report(
                     "; ".join(r.assertion_failures) if r.assertion_failures else "",
                     "true" if r.sla_breached else "false",
                 ])
+            if metrics.get("ssl_configured"):
+                info = getattr(r, "ssl_info", None)
+                if info and info.is_https:
+                    row.extend([
+                        info.status,
+                        "true" if info.valid else "false",
+                        info.days_remaining if info.days_remaining is not None else "",
+                        info.expires_at or "",
+                        info.issuer_org or info.issuer_cn or "",
+                        info.tls_version or "",
+                        info.error or info.warning or "",
+                    ])
+                elif info and not info.is_https:
+                    row.extend(["not_https", "", "", "", "", "", ""])
+                else:
+                    row.extend(["", "", "", "", "", "", ""])
             writer.writerow(row)
 
     return out.getvalue()
@@ -323,6 +422,13 @@ def generate_markdown_report(
         if metrics.get("sla_breached_count", 0) > 0:
             lines.append(f"- **SLA Breaches:** {metrics['sla_breached_count']}")
 
+    if metrics.get("ssl_configured"):
+        lines.append(
+            f"- **SSL/TLS Certificates:** {metrics['ssl_total_checked']} HTTPS checked "
+            f"({metrics['ssl_valid_count']} valid, {metrics['ssl_warning_count']} warnings, "
+            f"{metrics['ssl_expired_count']} expired, {metrics['ssl_error_count']} errors)"
+        )
+
     lines.extend([
         "",
         "## Latency Distribution",
@@ -349,7 +455,75 @@ def generate_markdown_report(
             lines.append(f"| `{err}` | {count} |")
 
     if not summary_only and all_results:
-        if metrics.get("assertions_configured"):
+        if metrics.get("assertions_configured") and metrics.get("ssl_configured"):
+            lines.extend([
+                "",
+                "## Detailed Results",
+                "| ID | URL | Status | Attempts | Latency | IP:Port | Assertions | SLA | SSL Status | Days Remaining | Error Category |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            ])
+            for r in all_results:
+                status = str(r.status) if r.status is not None else r.status_label
+                attempts = getattr(r, "attempts", 1)
+                err_cat = f"`{r.error_category}`" if getattr(r, "error_category", None) else "-"
+                assert_status = (
+                    "PASSED"
+                    if r.assertions_passed is True
+                    else (
+                        f"FAILED ({'; '.join(r.assertion_failures)})"
+                        if r.assertions_passed is False
+                        else "-"
+                    )
+                )
+                sla_status = "BREACHED" if r.sla_breached else "Met"
+                ssl_st = "-"
+                ssl_days = "-"
+                if getattr(r, "ssl_info", None):
+                    if r.ssl_info.is_https:
+                        ssl_st = r.ssl_info.status.upper()
+                        ssl_days = (
+                            str(r.ssl_info.days_remaining)
+                            if r.ssl_info.days_remaining is not None
+                            else "-"
+                        )
+                    else:
+                        ssl_st = "N/A (HTTP)"
+                lines.append(
+                    f"| {r.url_id} | {r.url} | {status} | {attempts} | {r.elapsed * 1000.0:.2f} ms | {r.ip_port} | {assert_status} | {sla_status} | {ssl_st} | {ssl_days} | {err_cat} |"
+                )
+        elif metrics.get("ssl_configured"):
+            lines.extend([
+                "",
+                "## Detailed Results",
+                "| ID | URL | Status | Attempts | Latency | IP:Port | SSL Status | Days Remaining | Issuer | Error Category |",
+                "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            ])
+            for r in all_results:
+                status = str(r.status) if r.status is not None else r.status_label
+                attempts = getattr(r, "attempts", 1)
+                err_cat = f"`{r.error_category}`" if getattr(r, "error_category", None) else "-"
+                ssl_st = "-"
+                ssl_days = "-"
+                ssl_iss = "-"
+                if getattr(r, "ssl_info", None):
+                    if r.ssl_info.is_https:
+                        ssl_st = r.ssl_info.status.upper()
+                        ssl_days = (
+                            str(r.ssl_info.days_remaining)
+                            if r.ssl_info.days_remaining is not None
+                            else "-"
+                        )
+                        ssl_iss = (
+                            r.ssl_info.issuer_org
+                            or r.ssl_info.issuer_cn
+                            or "-"
+                        )
+                    else:
+                        ssl_st = "N/A (HTTP)"
+                lines.append(
+                    f"| {r.url_id} | {r.url} | {status} | {attempts} | {r.elapsed * 1000.0:.2f} ms | {r.ip_port} | {ssl_st} | {ssl_days} | {ssl_iss} | {err_cat} |"
+                )
+        elif metrics.get("assertions_configured"):
             lines.extend([
                 "",
                 "## Detailed Results",
@@ -416,6 +590,14 @@ def generate_text_report(
         )
         if metrics.get("sla_breached_count", 0) > 0:
             lines.append(f"[SLA Checks] {metrics['sla_breached_count']} endpoint(s) breached latency threshold")
+    if metrics.get("ssl_configured"):
+        lines.append(
+            f"[SSL/TLS] {metrics['ssl_total_checked']} HTTPS checked: "
+            f"{metrics['ssl_valid_count']} valid, "
+            f"{metrics['ssl_warning_count']} warning, "
+            f"{metrics['ssl_expired_count']} expired, "
+            f"{metrics['ssl_error_count']} error"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -466,6 +648,24 @@ def render_report(
                 print(Fore.YELLOW + sla_str + Style.RESET_ALL)
             else:
                 print(sla_str)
+
+    if metrics.get("ssl_configured"):
+        ssl_summary_str = (
+            f"[SSL/TLS] {metrics['ssl_total_checked']} HTTPS checked: "
+            f"{metrics['ssl_valid_count']} valid, "
+            f"{metrics['ssl_warning_count']} warning, "
+            f"{metrics['ssl_expired_count']} expired, "
+            f"{metrics['ssl_error_count']} error"
+        )
+        if not no_colour:
+            color = (
+                Fore.GREEN
+                if (metrics["ssl_expired_count"] == 0 and metrics["ssl_error_count"] == 0)
+                else Fore.RED
+            )
+            print(color + ssl_summary_str + Style.RESET_ALL)
+        else:
+            print(ssl_summary_str)
 
 
 # Write the report to a file

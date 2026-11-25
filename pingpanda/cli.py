@@ -19,6 +19,7 @@ from pingpanda.cancellation import (
     ScanCancelled,
     capture_sigint,
 )
+from pingpanda.ssl_check import SslConfig
 from pingpanda.network import (
     check_all,
     DEFAULT_MAX_CONCURRENT,
@@ -175,6 +176,24 @@ def parse_arguments(argv=None):
         help="Maximum acceptable response time SLA in seconds (e.g. 0.5 for 500ms)",
     )
 
+    parser.add_argument(
+        "--check-ssl",
+        action="store_true",
+        help="Inspect SSL/TLS certificates on HTTPS endpoints (expiration, issuer, and protocol version)",
+    )
+    parser.add_argument(
+        "--ssl-expiry-warning",
+        type=positive_int,
+        default=None,
+        metavar="DAYS",
+        help="Flag SSL certificates expiring within DAYS as warnings (e.g. 30)",
+    )
+    parser.add_argument(
+        "--require-tls-version",
+        metavar="VERSION",
+        help="Enforce minimum TLS protocol version (e.g. '1.2' or '1.3')",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -226,6 +245,22 @@ def build_assertion_config(args: argparse.Namespace) -> AssertionConfig | None:
         expect_headers=expect_headers,
         max_latency=max_latency,
         custom_headers=custom_headers,
+    )
+
+
+def build_ssl_config(args: argparse.Namespace) -> SslConfig | None:
+    """Build an SslConfig from parsed CLI arguments, or None if SSL inspection not requested."""
+    check_ssl = getattr(args, "check_ssl", False)
+    expiry_warning = getattr(args, "ssl_expiry_warning", None)
+    require_tls = getattr(args, "require_tls_version", None)
+
+    if not check_ssl and expiry_warning is None and require_tls is None:
+        return None
+
+    return SslConfig(
+        enabled=True,
+        expiry_warning_days=expiry_warning,
+        require_tls_version=require_tls,
     )
 
 
@@ -289,6 +324,8 @@ async def main(argv=None):
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
 
+    ssl_config = build_ssl_config(args)
+
     def persist_progress(completed_results):
         save_checkpoint(args.checkpoint, urls, completed_results)
 
@@ -306,6 +343,7 @@ async def main(argv=None):
                 retry_delay=args.retry_delay,
                 assertion_config=assertion_config,
                 cancellation_token=cancellation_token,
+                ssl_config=ssl_config,
             )
 
         # Also create a checkpoint for an empty or already-complete resumed scan.

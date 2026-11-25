@@ -60,6 +60,11 @@ def save_checkpoint(
             "assertions_passed": getattr(result, "assertions_passed", None),
             "assertion_failures": list(getattr(result, "assertion_failures", [])),
             "sla_breached": getattr(result, "sla_breached", False),
+            "ssl_info": (
+                result.ssl_info.to_dict()
+                if getattr(result, "ssl_info", None) is not None
+                else None
+            ),
         }
 
     payload = {
@@ -139,6 +144,12 @@ def load_checkpoint(
             assertions_passed = item.get("assertions_passed")
             assertion_failures = item.get("assertion_failures", [])
             sla_breached = bool(item.get("sla_breached", False))
+            ssl_info_dict = item.get("ssl_info")
+            ssl_info = None
+            if ssl_info_dict is not None and isinstance(ssl_info_dict, dict):
+                from pingpanda.ssl_check import SslCertificateInfo
+
+                ssl_info = SslCertificateInfo.from_dict(ssl_info_dict)
             if (
                 isinstance(result_id, bool)
                 or not isinstance(result_id, int)
@@ -186,6 +197,7 @@ def load_checkpoint(
                 assertions_passed=assertions_passed,
                 assertion_failures=[str(f) for f in assertion_failures],
                 sla_breached=sla_breached,
+                ssl_info=ssl_info,
             )
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise CheckpointError(

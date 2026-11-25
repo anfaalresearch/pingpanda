@@ -15,6 +15,7 @@ from tqdm import tqdm
 from pingpanda.assertions import AssertionConfig, evaluate_assertions
 from pingpanda.cancellation import CancellationToken, ScanCancelled
 from pingpanda.models import UrlResult
+from pingpanda.ssl_check import SslConfig, inspect_ssl_certificate
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_CONCURRENT = 10
@@ -123,6 +124,7 @@ async def check_url_status(
     max_retries=DEFAULT_RETRIES,
     retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
     assertion_config: AssertionConfig | None = None,
+    ssl_config: SslConfig | None = None,
 ):
     _validate_retry_options(max_retries, retry_delay)
     url = normalize_url(url)
@@ -164,6 +166,10 @@ async def check_url_status(
                 elapsed,
                 assertion_config,
             )
+            ssl_info = None
+            if ssl_config and ssl_config.enabled:
+                ssl_info = await inspect_ssl_certificate(url, ssl_config=ssl_config)
+
             return UrlResult(
                 url_id,
                 url,
@@ -177,6 +183,7 @@ async def check_url_status(
                 assertions_passed=assertions_passed,
                 assertion_failures=assertion_failures,
                 sla_breached=sla_breached,
+                ssl_info=ssl_info,
             )
 
         if response.status_code in RETRYABLE_STATUS_CODES and attempts <= max_retries:
@@ -209,6 +216,10 @@ async def check_url_status(
             assertion_config,
         )
 
+        ssl_info = None
+        if ssl_config and ssl_config.enabled:
+            ssl_info = await inspect_ssl_certificate(url, ssl_config=ssl_config)
+
         return UrlResult(
             url_id,
             url,
@@ -221,6 +232,7 @@ async def check_url_status(
             assertions_passed=assertions_passed,
             assertion_failures=assertion_failures,
             sla_breached=sla_breached,
+            ssl_info=ssl_info,
         )
 
 
@@ -234,6 +246,7 @@ async def check_all(
     retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
     assertion_config: AssertionConfig | None = None,
     cancellation_token: CancellationToken | None = None,
+    ssl_config: SslConfig | None = None,
 ):
     """Check unfinished URLs with bounded concurrency.
 
@@ -309,6 +322,7 @@ async def check_all(
                         max_retries=max_retries,
                         retry_delay=retry_delay,
                         assertion_config=assertion_config,
+                        ssl_config=ssl_config,
                     )
                     results[result.url_id] = result
 

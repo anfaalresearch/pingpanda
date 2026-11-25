@@ -24,7 +24,13 @@ from pingpanda.assertions import (
     parse_header_option,
     parse_status_codes,
 )
-from pingpanda.cli import build_assertion_config, load_urls, main, parse_arguments
+from pingpanda.cli import (
+    build_assertion_config,
+    build_ssl_config,
+    load_urls,
+    main,
+    parse_arguments,
+)
 from pingpanda.constants import BANNER, COLORS, STATUS_GROUPS
 from pingpanda.models import UrlResult
 from pingpanda.network import (
@@ -32,6 +38,12 @@ from pingpanda.network import (
     check_url_status,
     normalize_url,
     resolve_ip_and_port,
+)
+from pingpanda.ssl_check import (
+    SslCertificateInfo,
+    SslConfig,
+    compare_tls_version,
+    inspect_ssl_certificate,
 )
 from pingpanda.report import (
     classify_results,
@@ -52,11 +64,15 @@ __all__ = [
     "BANNER",
     "COLORS",
     "STATUS_GROUPS",
+    "SslCertificateInfo",
+    "SslConfig",
     "UrlResult",
     "build_assertion_config",
+    "build_ssl_config",
     "check_all",
     "check_url_status",
     "classify_results",
+    "compare_tls_version",
     "compute_latency_percentiles",
     "evaluate_assertions",
     "extract_scan_metrics",
@@ -65,6 +81,7 @@ __all__ = [
     "generate_json_report",
     "generate_markdown_report",
     "generate_text_report",
+    "inspect_ssl_certificate",
     "load_urls",
     "main",
     "normalize_url",

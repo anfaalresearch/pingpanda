@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pingpanda.ssl_check import SslCertificateInfo
 
 
 @dataclass
@@ -21,6 +25,7 @@ class UrlResult:
     assertions_passed: bool | None = None
     assertion_failures: list[str] = field(default_factory=list)
     sla_breached: bool = False
+    ssl_info: SslCertificateInfo | None = None
 
     @property
     def status_label(self) -> str:
