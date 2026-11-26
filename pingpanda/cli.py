@@ -20,6 +20,12 @@ from pingpanda.cancellation import (
     capture_sigint,
 )
 from pingpanda.ssl_check import SslConfig
+from pingpanda.watch import (
+    WatchConfig,
+    format_watch_summary,
+    run_watch,
+    save_watch_report,
+)
 from pingpanda.network import (
     check_all,
     DEFAULT_MAX_CONCURRENT,
@@ -74,6 +80,18 @@ def non_negative_float(value):
 
     if number < 0 or not math.isfinite(number):
         raise argparse.ArgumentTypeError("must be a finite, non-negative number")
+
+    return number
+
+
+def positive_float(value):
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a number")
+
+    if number <= 0 or not math.isfinite(number):
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
 
     return number
 
@@ -193,6 +211,25 @@ def parse_arguments(argv=None):
         metavar="VERSION",
         help="Enforce minimum TLS protocol version (e.g. '1.2' or '1.3')",
     )
+    parser.add_argument(
+        "--watch",
+        type=positive_float,
+        default=None,
+        metavar="SECONDS",
+        help="Continuously monitor URL(s) every SECONDS interval until stopped",
+    )
+    parser.add_argument(
+        "--watch-cycles",
+        type=positive_int,
+        default=None,
+        metavar="N",
+        help="Stop watch monitoring automatically after N cycles",
+    )
+    parser.add_argument(
+        "--watch-changes-only",
+        action="store_true",
+        help="Only print subsequent watch cycles when a transition or regression occurs",
+    )
 
     return parser.parse_args(argv)
 
@@ -264,6 +301,24 @@ def build_ssl_config(args: argparse.Namespace) -> SslConfig | None:
     )
 
 
+def build_watch_config(args: argparse.Namespace) -> WatchConfig | None:
+    """Build a WatchConfig from parsed CLI arguments, or None if watch mode is off."""
+    interval = getattr(args, "watch", None)
+    max_cycles = getattr(args, "watch_cycles", None)
+    changes_only = bool(getattr(args, "watch_changes_only", False))
+
+    if interval is None:
+        if max_cycles is not None or changes_only:
+            raise ValueError("--watch-cycles and --watch-changes-only require --watch")
+        return None
+
+    return WatchConfig(
+        interval_seconds=interval,
+        max_cycles=max_cycles,
+        changes_only=changes_only,
+    )
+
+
 def load_urls(args):
     if args.domain:
         url = args.domain.strip()
@@ -320,6 +375,7 @@ async def main(argv=None):
 
     try:
         assertion_config = build_assertion_config(args)
+        watch_config = build_watch_config(args)
     except ValueError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
@@ -330,6 +386,29 @@ async def main(argv=None):
         save_checkpoint(args.checkpoint, urls, completed_results)
 
     cancellation_token = CancellationToken()
+
+    if watch_config is not None:
+        with capture_sigint(cancellation_token):
+            tracker, interrupted = await run_watch(
+                urls,
+                watch_config,
+                max_concurrent=args.max_concurrent,
+                show_progress=not args.quiet,
+                max_retries=args.retries,
+                retry_delay=args.retry_delay,
+                assertion_config=assertion_config,
+                ssl_config=ssl_config,
+                cancellation_token=cancellation_token,
+                no_colour=args.no_colour,
+            )
+
+        summary_data = tracker.build_summary_data()
+        print(format_watch_summary(summary_data, no_colour=args.no_colour))
+
+        if args.output:
+            save_watch_report(summary_data, args.output, format=args.format)
+
+        return 130 if interrupted else 0
 
     try:
         with capture_sigint(cancellation_token):

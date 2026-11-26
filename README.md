@@ -61,6 +61,8 @@ pingpanda/
 ├── models.py            Data model for a checked URL
 ├── network.py           URL preparation, address lookup, and checks
 ├── report.py            Grouping, formatting, and saving results
+├── ssl_check.py         SSL/TLS certificate inspection and expiry checks
+├── watch.py             Continuous watch mode, uptime tracking, and diff alerts
 ├── checkpoint.py        Atomic checkpoint storage and validation
 └── cli.py               Argument parsing and application flow
 tests/                   Test suite (no external network access)
@@ -205,6 +207,9 @@ https://python.org
 | `--check-ssl` | Inspect SSL/TLS certificates on HTTPS endpoints (validity, days to expiry, issuer, and protocol) |
 | `--ssl-expiry-warning DAYS` | Flag certificates expiring within `DAYS` as warnings (e.g. `30`) |
 | `--require-tls-version VERSION` | Enforce minimum TLS protocol version (e.g. `'1.2'` or `'1.3'`) |
+| `--watch SECONDS` | Continuously monitor URL(s) every `SECONDS` interval until stopped |
+| `--watch-cycles N` | Stop watch monitoring automatically after `N` cycles |
+| `--watch-changes-only` | Only print subsequent watch cycles when a transition or regression occurs |
 | `--checkpoint PATH` | Choose where scan progress is saved (default: `.pingpanda-checkpoint.json`) |
 | `--resume` | Resume from the selected checkpoint, skipping completed URLs |
 | `--retries N` | Retry transient failures up to `N` times after the initial request (default: `0`) |
@@ -238,6 +243,18 @@ python url-status-checker.py -l urls.txt --quiet --no-colour
 ```
 
 Quiet mode still displays the final report.
+
+### Continuous Watch Mode
+
+Monitor a single URL or a list of endpoints periodically and track rolling uptime, state transitions (`REGRESSION`, `RECOVERED`, `SLA BREACH`, `SSL CHANGE`), and latency percentiles across cycles:
+
+```bash
+# Monitor URLs every 10 seconds until Ctrl+C
+python url-status-checker.py -l urls.txt --watch 10
+
+# Run 5 bounded cycles, print only changes, and export JSON summary
+python url-status-checker.py -l urls.txt --watch 5 --watch-cycles 5 --watch-changes-only --format json -o watch-summary.json
+```
 
 ### HTTP Health Assertions & Latency SLA Validation
 
