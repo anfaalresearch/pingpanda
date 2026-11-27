@@ -36,6 +36,7 @@ PingPanda started as [Status Checker](https://github.com/BLACK-SCORP10/url-statu
 - Save the report to a text file.
 - Save completed scan results to an atomic checkpoint after each URL finishes.
 - Resume interrupted scans without rechecking completed URLs; checkpoint inputs are validated before reuse.
+- Reuse DNS resolutions within a scan through a bounded TTL cache with duplicate in-flight lookup prevention.
 - Print a summary line at the end of every run.
 - Simple command-line interface with built-in help.
 
@@ -64,6 +65,7 @@ pingpanda/
 ├── ssl_check.py         SSL/TLS certificate inspection and expiry checks
 ├── watch.py             Continuous watch mode, uptime tracking, and diff alerts
 ├── checkpoint.py        Atomic checkpoint storage and validation
+├── dns_cache.py         Shared TTL DNS cache and single-flight resolution
 └── cli.py               Argument parsing and application flow
 tests/                   Test suite (no external network access)
 .github/                 CI workflow and issue/PR templates
@@ -215,6 +217,9 @@ https://python.org
 | `--retries N` | Retry transient failures up to `N` times after the initial request (default: `0`) |
 | `--retry-delay SECONDS` | Initial delay before retrying; each later delay doubles (default: `1`) |
 | `--max-concurrent N` | Maximum number of URLs checked concurrently (default: `10`) |
+| `--dns-cache-ttl SECONDS` | Cache successful DNS resolutions for this many seconds (default: `60`) |
+| `--dns-negative-ttl SECONDS` | Cache failed DNS resolutions for this many seconds (default: `5`) |
+| `--dns-cache-size N` | Maximum DNS cache entries kept during one scan (default: `256`) |
 | `-v`, `--version` | Show version information |
 | `--quiet` | Suppress the startup banner and progress bar |
 | `--no-colour` | Disable coloured terminal output |
@@ -255,6 +260,29 @@ python url-status-checker.py -l urls.txt --watch 10
 # Run 5 bounded cycles, print only changes, and export JSON summary
 python url-status-checker.py -l urls.txt --watch 5 --watch-cycles 5 --watch-changes-only --format json -o watch-summary.json
 ```
+
+### Shared DNS Cache
+
+PingPanda keeps a small DNS cache for the duration of each scan. When several
+concurrent URL checks use the same hostname and port, they share one in-flight
+DNS lookup instead of resolving the same destination repeatedly.
+
+Successful lookups are cached for 60 seconds by default. Failed lookups use a
+shorter 5-second negative-cache TTL, and the cache is limited to 256 entries so
+large scans cannot grow it without bound.
+
+The defaults can be tuned when needed:
+
+```bash
+python url-status-checker.py -l urls.txt \
+  --dns-cache-ttl 120 \
+  --dns-negative-ttl 2 \
+  --dns-cache-size 512
+```
+
+Setting a TTL to `0` disables storage for that result type while still allowing
+simultaneous callers to share the same active DNS lookup. Cache state is scoped
+to a single scan and is not persisted between runs.
 
 ### HTTP Health Assertions & Latency SLA Validation
 
