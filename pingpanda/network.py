@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import socket
 import time
 from urllib.parse import urlparse
 
@@ -14,6 +13,12 @@ from tqdm import tqdm
 
 from pingpanda.assertions import AssertionConfig, evaluate_assertions
 from pingpanda.cancellation import CancellationToken, ScanCancelled
+from pingpanda.dns_cache import (
+    DEFAULT_DNS_CACHE_SIZE,
+    DEFAULT_DNS_CACHE_TTL,
+    DEFAULT_DNS_NEGATIVE_TTL,
+    DnsCache,
+)
 from pingpanda.models import UrlResult
 from pingpanda.ssl_check import SslConfig, inspect_ssl_certificate
 
@@ -25,7 +30,7 @@ RETRYABLE_STATUS_CODES = frozenset({408, 429, 502, 503, 504})
 
 
 # Function to resolve hostname to IP:Port
-async def resolve_ip_and_port(url):
+async def resolve_ip_and_port(url, dns_cache: DnsCache | None = None):
     try:
         parsed = urlparse(url)
         hostname = parsed.hostname
@@ -38,26 +43,9 @@ async def resolve_ip_and_port(url):
             80 if scheme == "http" else 443
         )
 
-        loop = asyncio.get_running_loop()
-
-        addresses = await asyncio.wait_for(
-            loop.getaddrinfo(
-                hostname,
-                port,
-                type=socket.SOCK_STREAM,
-            ),
-            timeout=DEFAULT_TIMEOUT_SECONDS,
-        )
-
-        if not addresses:
-            return "IP:Port Not Found"
-
-        ip_address = addresses[0][4][0]
-
-        if ":" in ip_address:
-            return f"[{ip_address}]:{port}"
-
-        return f"{ip_address}:{port}"
+        cache = dns_cache or DnsCache(timeout=DEFAULT_TIMEOUT_SECONDS)
+        resolved = await cache.resolve(hostname, port)
+        return resolved or "IP:Port Not Found"
 
     except (OSError, ValueError, asyncio.TimeoutError):
         return "IP:Port Not Found"
@@ -125,6 +113,7 @@ async def check_url_status(
     retry_delay=DEFAULT_RETRY_DELAY_SECONDS,
     assertion_config: AssertionConfig | None = None,
     ssl_config: SslConfig | None = None,
+    dns_cache: DnsCache | None = None,
 ):
     _validate_retry_options(max_retries, retry_delay)
     url = normalize_url(url)
@@ -193,9 +182,9 @@ async def check_url_status(
 
         elapsed = time.perf_counter() - started
         final_url = str(response.url)
-        original_ip_port = await resolve_ip_and_port(url)
+        original_ip_port = await resolve_ip_and_port(url, dns_cache=dns_cache)
         redirect_ip_port = (
-            await resolve_ip_and_port(final_url)
+            await resolve_ip_and_port(final_url, dns_cache=dns_cache)
             if final_url != url
             else None
         )
@@ -247,6 +236,9 @@ async def check_all(
     assertion_config: AssertionConfig | None = None,
     cancellation_token: CancellationToken | None = None,
     ssl_config: SslConfig | None = None,
+    dns_cache_ttl: float = DEFAULT_DNS_CACHE_TTL,
+    dns_negative_ttl: float = DEFAULT_DNS_NEGATIVE_TTL,
+    dns_cache_size: int = DEFAULT_DNS_CACHE_SIZE,
 ):
     """Check unfinished URLs with bounded concurrency.
 
@@ -262,6 +254,13 @@ async def check_all(
     ):
         raise ValueError("max_concurrent must be a positive integer")
     _validate_retry_options(max_retries, retry_delay)
+
+    dns_cache = DnsCache(
+        ttl=dns_cache_ttl,
+        negative_ttl=dns_negative_ttl,
+        max_entries=dns_cache_size,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+    )
 
     urls = list(urls)
     results = dict(initial_results or {})
@@ -323,6 +322,7 @@ async def check_all(
                         retry_delay=retry_delay,
                         assertion_config=assertion_config,
                         ssl_config=ssl_config,
+                        dns_cache=dns_cache,
                     )
                     results[result.url_id] = result
 

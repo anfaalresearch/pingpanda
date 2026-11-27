@@ -32,6 +32,12 @@ from pingpanda.cli import (
     parse_arguments,
 )
 from pingpanda.constants import BANNER, COLORS, STATUS_GROUPS
+from pingpanda.dns_cache import (
+    DEFAULT_DNS_CACHE_SIZE,
+    DEFAULT_DNS_CACHE_TTL,
+    DEFAULT_DNS_NEGATIVE_TTL,
+    DnsCache,
+)
 from pingpanda.models import UrlResult
 from pingpanda.network import (
     check_all,
@@ -63,6 +69,10 @@ __all__ = [
     "AssertionConfig",
     "BANNER",
     "COLORS",
+    "DEFAULT_DNS_CACHE_SIZE",
+    "DEFAULT_DNS_CACHE_TTL",
+    "DEFAULT_DNS_NEGATIVE_TTL",
+    "DnsCache",
     "STATUS_GROUPS",
     "SslCertificateInfo",
     "SslConfig",

@@ -19,6 +19,11 @@ from pingpanda.cancellation import (
     ScanCancelled,
     capture_sigint,
 )
+from pingpanda.dns_cache import (
+    DEFAULT_DNS_CACHE_SIZE,
+    DEFAULT_DNS_CACHE_TTL,
+    DEFAULT_DNS_NEGATIVE_TTL,
+)
 from pingpanda.ssl_check import SslConfig
 from pingpanda.network import (
     check_all,
@@ -125,6 +130,27 @@ def parse_arguments(argv=None):
         type=positive_int,
         default=DEFAULT_MAX_CONCURRENT,
         help="Maximum number of URLs to check concurrently (default: 10)",
+    )
+    parser.add_argument(
+        "--dns-cache-ttl",
+        type=non_negative_float,
+        default=DEFAULT_DNS_CACHE_TTL,
+        metavar="SECONDS",
+        help="TTL for successful DNS cache entries (default: 60)",
+    )
+    parser.add_argument(
+        "--dns-negative-ttl",
+        type=non_negative_float,
+        default=DEFAULT_DNS_NEGATIVE_TTL,
+        metavar="SECONDS",
+        help="TTL for failed DNS lookups (default: 5)",
+    )
+    parser.add_argument(
+        "--dns-cache-size",
+        type=positive_int,
+        default=DEFAULT_DNS_CACHE_SIZE,
+        metavar="N",
+        help="Maximum shared DNS cache entries per scan (default: 256)",
     )
     parser.add_argument(
         "--format",
@@ -344,6 +370,9 @@ async def main(argv=None):
                 assertion_config=assertion_config,
                 cancellation_token=cancellation_token,
                 ssl_config=ssl_config,
+                dns_cache_ttl=args.dns_cache_ttl,
+                dns_negative_ttl=args.dns_negative_ttl,
+                dns_cache_size=args.dns_cache_size,
             )
 
         # Also create a checkpoint for an empty or already-complete resumed scan.
